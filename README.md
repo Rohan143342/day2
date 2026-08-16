@@ -13,7 +13,8 @@ not a lender. Nothing here is production ready: see
 | Identity, consent, lender/product, audit, idempotency, outbox schema | implemented (Prisma migration) |
 | OTP authentication, device registry, refresh-token rotation with replay detection | implemented, e2e tested |
 | Granular consent capture and withdrawal | implemented, e2e tested |
-| KYC, credit bureau, risk/fraud decisioning, offers/KFS, e-sign, ledger, disbursement, repayments, support, admin, mobile app | **not implemented** |
+| Product listing and server-computed quote (EMI, fees, tax, APR, full schedule) | implemented, e2e tested |
+| KYC, credit bureau, risk/fraud decisioning, binding offers/KFS, e-sign, ledger, disbursement, repayments, support, admin, mobile app | **not implemented** |
 
 ## Design principles enforced in code
 
