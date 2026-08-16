@@ -19,7 +19,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d lending"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -40,11 +40,14 @@ jobs:
 
       - run: npm ci
 
-      - name: Apply migrations
+      # The e2e suites assume the reference data a deployment ships with -
+      # consent purposes and their versioned text - so the seed runs here too.
+      - name: Apply migrations and seed reference data
         working-directory: apps/api
         run: |
           npx prisma generate
           npx prisma migrate deploy
+          npx ts-node prisma/seed.ts
 
       - run: npm run build
 
