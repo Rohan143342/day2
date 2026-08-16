@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { ConsentModule } from './modules/consent/consent.module';
 import { HealthController } from './modules/health/health.controller';
+import { ProductsModule } from './modules/products/products.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CommonModule,
     AuthModule,
     ConsentModule,
+    ProductsModule,
   ],
   controllers: [HealthController],
   providers: [
