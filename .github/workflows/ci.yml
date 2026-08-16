@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lending
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lending"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lending?schema=public
+      # test/setup-env.ts generates throwaway key material per run; no key,
+      # secret or provider credential is ever needed here.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      # The e2e suites assume the reference data a deployment ships with -
+      # consent purposes and their versioned text - so the seed runs here too.
+      - name: Apply migrations and seed reference data
+        working-directory: apps/api
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          npx ts-node prisma/seed.ts
+
+      - run: npm run build
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      # The API suite runs end-to-end against the real database above; it is
+      # serial by configuration so suites cannot race on shared rows.
+      - run: npm test

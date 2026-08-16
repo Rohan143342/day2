@@ -1,8 +1,12 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { LoanProductVersion, ProductStatus } from '@prisma/client';
+import { Lender, LoanProduct, LoanProductVersion, ProductStatus } from '@prisma/client';
 import { Money, buildQuote } from '@lending/money';
 import { AppException, ErrorCode } from '../../common/errors';
 import { PrismaService } from '../../prisma/prisma.service';
+
+export type OfferableVersion = LoanProductVersion & {
+  product: LoanProduct & { lender: Lender };
+};
 
 export interface ProductOption {
   productVersionId: string;
@@ -94,17 +98,24 @@ export class ProductsService {
     }));
   }
 
-  async quote(params: { productVersionId: string; amount: string; tenureMonths: number }): Promise<QuoteView> {
+  /**
+   * Loads a version that a lender is currently willing to lend against, and
+   * checks the request sits inside its limits. Shared by quoting and application
+   * creation so both enforce exactly the same product gate.
+   */
+  async requireOfferableVersion(productVersionId: string): Promise<OfferableVersion> {
     const version = await this.prisma.loanProductVersion.findUnique({
-      where: { id: params.productVersionId },
+      where: { id: productVersionId },
       include: { product: { include: { lender: true } } },
     });
     if (!version) {
       throw new AppException(ErrorCode.NOT_FOUND, 'That loan product is not available.', HttpStatus.NOT_FOUND);
     }
     this.assertOffereable(version);
+    return version;
+  }
 
-    const amount = Money.fromMajor(params.amount);
+  assertWithinLimits(version: LoanProductVersion, amount: Money, tenureMonths: number): void {
     if (amount.lessThan(Money.fromMajor(version.minAmount.toString()))) {
       throw new AppException(
         ErrorCode.VALIDATION_FAILED,
@@ -117,12 +128,19 @@ export class ProductsService {
         `The maximum amount for this product is ₹${version.maxAmount.toFixed(2)}.`,
       );
     }
-    if (params.tenureMonths < version.minTenureMonths || params.tenureMonths > version.maxTenureMonths) {
+    if (tenureMonths < version.minTenureMonths || tenureMonths > version.maxTenureMonths) {
       throw new AppException(
         ErrorCode.VALIDATION_FAILED,
         `Tenure must be between ${version.minTenureMonths} and ${version.maxTenureMonths} months.`,
       );
     }
+  }
+
+  async quote(params: { productVersionId: string; amount: string; tenureMonths: number }): Promise<QuoteView> {
+    const version = await this.requireOfferableVersion(params.productVersionId);
+
+    const amount = Money.fromMajor(params.amount);
+    this.assertWithinLimits(version, amount, params.tenureMonths);
 
     const firstDueDate = new Date();
     firstDueDate.setMonth(firstDueDate.getMonth() + 1);
