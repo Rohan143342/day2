@@ -1,0 +1,317 @@
+// Phase 0/1 schema: identity, consent, lender/product configuration, and the
+// platform tables (audit, idempotency, outbox) that later phases build on.
+// Money is NUMERIC(20,4); nothing financial is ever a float.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum DeviceTrustState {
+  UNVERIFIED
+  TRUSTED
+  BLOCKED
+}
+
+enum OtpPurpose {
+  REGISTRATION
+  LOGIN
+  DEVICE_VERIFICATION
+  BANK_ACCOUNT_CHANGE
+}
+
+enum InterestMethodology {
+  REDUCING_BALANCE
+  FLAT
+}
+
+enum RepaymentFrequency {
+  MONTHLY
+}
+
+enum FeeCollection {
+  DEDUCT_FROM_DISBURSEMENT
+  COLLECTED_SEPARATELY
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  WITHDRAWN
+}
+
+enum LenderStatus {
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Encrypted at the field level; lookups go through phoneBlindIndex.
+  phoneEncrypted  String     @map("phone_encrypted")
+  phoneBlindIndex String     @unique @map("phone_blind_index")
+  phoneLast4      String     @map("phone_last4") @db.VarChar(4)
+  status          UserStatus @default(PENDING_VERIFICATION)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  devices        Device[]
+  sessions       Session[]
+  otpChallenges  OtpChallenge[]
+  consents       Consent[]
+
+  @@map("users")
+}
+
+model Device {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  /// Client-generated installation identifier; never a hardware identifier.
+  installationId  String           @map("installation_id")
+  model           String?
+  osVersion       String?          @map("os_version")
+  appVersion      String?          @map("app_version")
+  integrityVerdict String?         @map("integrity_verdict")
+  trustState      DeviceTrustState @default(UNVERIFIED) @map("trust_state")
+  firstSeenAt     DateTime         @default(now()) @map("first_seen_at")
+  lastSeenAt      DateTime         @default(now()) @map("last_seen_at")
+
+  sessions Session[]
+
+  @@unique([userId, installationId])
+  @@map("devices")
+}
+
+model Session {
+  id       String @id @default(uuid()) @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  user     User   @relation(fields: [userId], references: [id])
+  deviceId String @map("device_id") @db.Uuid
+  device   Device @relation(fields: [deviceId], references: [id])
+
+  /// Rotating refresh tokens: one family per login, only the newest is valid.
+  familyId          String    @map("family_id") @db.Uuid
+  refreshTokenHash  String    @unique @map("refresh_token_hash")
+  rotatedFromId     String?   @map("rotated_from_id") @db.Uuid
+  issuedAt          DateTime  @default(now()) @map("issued_at")
+  expiresAt         DateTime  @map("expires_at")
+  usedAt            DateTime? @map("used_at")
+  revokedAt         DateTime? @map("revoked_at")
+  revokedReason     String?   @map("revoked_reason")
+  ipHash            String?   @map("ip_hash")
+  userAgent         String?   @map("user_agent")
+
+  @@index([userId, familyId])
+  @@map("sessions")
+}
+
+model OtpChallenge {
+  id     String     @id @default(uuid()) @db.Uuid
+  userId String     @map("user_id") @db.Uuid
+  user   User       @relation(fields: [userId], references: [id])
+  purpose OtpPurpose
+
+  codeHash    String    @map("code_hash")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  expiresAt   DateTime  @map("expires_at")
+  consumedAt  DateTime? @map("consumed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, purpose, createdAt])
+  @@map("otp_challenges")
+}
+
+model ConsentPurpose {
+  code          String   @id
+  title         String
+  description   String
+  dataCategories String[] @map("data_categories")
+  /// Required consents block the journey; optional ones must never be bundled with them.
+  required      Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  texts    ConsentText[]
+  consents Consent[]
+
+  @@map("consent_purposes")
+}
+
+model ConsentText {
+  id          String   @id @default(uuid()) @db.Uuid
+  purposeCode String   @map("purpose_code")
+  purpose     ConsentPurpose @relation(fields: [purposeCode], references: [code])
+  version     Int
+  locale      String   @default("en-IN")
+  body        String
+  effectiveFrom DateTime @map("effective_from")
+
+  @@unique([purposeCode, version, locale])
+  @@map("consent_texts")
+}
+
+model Consent {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  user        User     @relation(fields: [userId], references: [id])
+  purposeCode String   @map("purpose_code")
+  purpose     ConsentPurpose @relation(fields: [purposeCode], references: [code])
+
+  textVersion Int       @map("text_version")
+  granted     Boolean
+  grantedAt   DateTime  @map("granted_at")
+  withdrawnAt DateTime? @map("withdrawn_at")
+  ipHash      String?   @map("ip_hash")
+  deviceId    String?   @map("device_id") @db.Uuid
+
+  @@index([userId, purposeCode, grantedAt])
+  @@map("consents")
+}
+
+model Lender {
+  id               String       @id @default(uuid()) @db.Uuid
+  legalName        String       @map("legal_name")
+  brandName        String       @map("brand_name")
+  /// Regulator-issued licence details. Never populated with a placeholder in production.
+  licenseType      String       @map("license_type")
+  licenseReference String       @map("license_reference")
+  grievanceOfficerName  String  @map("grievance_officer_name")
+  grievanceEmail        String  @map("grievance_email")
+  grievancePhone        String  @map("grievance_phone")
+  status           LenderStatus @default(ONBOARDING)
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  products LoanProduct[]
+
+  @@map("lenders")
+}
+
+model LoanProduct {
+  id       String @id @default(uuid()) @db.Uuid
+  lenderId String @map("lender_id") @db.Uuid
+  lender   Lender @relation(fields: [lenderId], references: [id])
+  code     String
+  name     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  versions LoanProductVersion[]
+
+  @@unique([lenderId, code])
+  @@map("loan_products")
+}
+
+/// Immutable once ACTIVE. A loan references the version it was originated under,
+/// so repricing a product can never reprice a live loan.
+model LoanProductVersion {
+  id        String      @id @default(uuid()) @db.Uuid
+  productId String      @map("product_id") @db.Uuid
+  product   LoanProduct @relation(fields: [productId], references: [id])
+  version   Int
+
+  minAmount       Decimal @map("min_amount") @db.Decimal(20, 4)
+  maxAmount       Decimal @map("max_amount") @db.Decimal(20, 4)
+  minTenureMonths Int     @map("min_tenure_months")
+  maxTenureMonths Int     @map("max_tenure_months")
+
+  interestMethodology InterestMethodology @map("interest_methodology")
+  annualRatePercent   Decimal             @map("annual_rate_percent") @db.Decimal(9, 4)
+  repaymentFrequency  RepaymentFrequency  @default(MONTHLY) @map("repayment_frequency")
+
+  processingFeePercent Decimal  @map("processing_fee_percent") @db.Decimal(9, 4)
+  processingFeeMin     Decimal? @map("processing_fee_min") @db.Decimal(20, 4)
+  processingFeeMax     Decimal? @map("processing_fee_max") @db.Decimal(20, 4)
+  taxOnFeesPercent     Decimal  @map("tax_on_fees_percent") @db.Decimal(9, 4)
+  feeCollection        FeeCollection @map("fee_collection")
+
+  latePaymentFeePercent Decimal @map("late_payment_fee_percent") @db.Decimal(9, 4)
+  latePaymentGraceDays  Int     @map("late_payment_grace_days")
+  /// Repayment allocation order, e.g. ["PENALTY","FEES","INTEREST","PRINCIPAL"].
+  allocationOrder       String[] @map("allocation_order")
+  coolingOffDays        Int      @map("cooling_off_days")
+
+  minAgeYears       Int      @map("min_age_years")
+  maxAgeYears       Int      @map("max_age_years")
+  minMonthlyIncome  Decimal  @map("min_monthly_income") @db.Decimal(20, 4)
+  allowedStates     String[] @map("allowed_states")
+
+  status        ProductStatus @default(DRAFT)
+  effectiveFrom DateTime      @map("effective_from")
+  effectiveTo   DateTime?     @map("effective_to")
+  approvedBy    String?       @map("approved_by")
+  approvedAt    DateTime?     @map("approved_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@unique([productId, version])
+  @@map("loan_product_versions")
+}
+
+/// Append-only. No application or admin role is granted DELETE or UPDATE.
+model AuditLog {
+  id            BigInt   @id @default(autoincrement())
+  actorType     String   @map("actor_type")
+  actorId       String?  @map("actor_id")
+  action        String
+  resourceType  String   @map("resource_type")
+  resourceId    String?  @map("resource_id")
+  oldValue      Json?    @map("old_value")
+  newValue      Json?    @map("new_value")
+  reason        String?
+  ipHash        String?  @map("ip_hash")
+  correlationId String   @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model IdempotencyKey {
+  key            String    @id
+  endpoint       String
+  userId         String?   @map("user_id") @db.Uuid
+  requestHash    String    @map("request_hash")
+  status         String
+  responseStatus Int?      @map("response_status")
+  responseBody   Json?     @map("response_body")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  completedAt    DateTime? @map("completed_at")
+  expiresAt      DateTime  @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+/// Transactional outbox: events are written in the same transaction as the state
+/// change and published afterwards, so a state change can never exist without
+/// its event or vice versa.
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  aggregateType String    @map("aggregate_type")
+  aggregateId   String    @map("aggregate_id")
+  eventType     String    @map("event_type")
+  eventVersion  Int       @default(1) @map("event_version")
+  payload       Json
+  correlationId String    @map("correlation_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  publishedAt   DateTime? @map("published_at")
+  attempts      Int       @default(0)
+
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
+}

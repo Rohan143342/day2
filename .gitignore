@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+
+# Android
+.gradle/
+local.properties
+*.apk
+*.keystore
+*.jks
