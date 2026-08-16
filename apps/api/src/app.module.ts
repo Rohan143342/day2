@@ -6,6 +6,7 @@ import { CommonModule } from './common/common.module';
 import { IdempotencyInterceptor } from './common/idempotency.interceptor';
 import { CorrelationIdMiddleware } from './common/request-context';
 import { validateEnv } from './config/env.validation';
+import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { ConsentModule } from './modules/consent/consent.module';
@@ -23,6 +24,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ConsentModule,
     ProductsModule,
     KycModule,
+    ApplicationsModule,
   ],
   controllers: [HealthController],
   providers: [

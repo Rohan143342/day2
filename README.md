@@ -9,13 +9,15 @@ not a lender. Nothing here is production ready: see
 
 | Area | Status |
 | --- | --- |
-| `packages/money` — exact monetary arithmetic, amortization, APR, fee/tax, repayment allocation | implemented, 36 tests |
+| `packages/money` — exact monetary arithmetic, amortization, APR, fee/tax, repayment allocation, affordability/FOIR | implemented, 45 tests |
 | Identity, consent, lender/product, audit, idempotency, outbox schema | implemented (Prisma migration) |
 | OTP authentication, device registry, refresh-token rotation with replay detection | implemented, e2e tested |
 | Granular consent capture and withdrawal | implemented, e2e tested |
 | Product listing and server-computed quote (EMI, fees, tax, APR, full schedule) | implemented, e2e tested |
 | KYC provider abstraction (PAN + offline-Aadhaar OTP) with mock provider, encrypted documents, duplicate-document detection | implemented, e2e tested |
-| Credit bureau, risk/fraud decisioning, binding offers/KFS, e-sign, ledger, disbursement, repayments, support, admin, mobile app | **not implemented** |
+| Loan application lifecycle (state machine, append-only transition history) and financial/employment onboarding | implemented, e2e tested |
+| Rule-based credit decisioning with a versioned policy, reason codes and retained decision inputs; weighted fraud signals | implemented, e2e tested |
+| Credit bureau enquiry, binding offers/KFS, e-sign, ledger, disbursement, repayments, support, admin, mobile app | **not implemented** |
 
 ## Design principles enforced in code
 
@@ -79,8 +81,8 @@ grievance contacts and pricing must come from an executed lender agreement.
 ## Repository layout
 
 ```
-packages/money      exact money, amortization, APR, allocation (no framework deps)
-apps/api            NestJS modular monolith: auth, consent, common platform services
+packages/money      exact money, amortization, APR, allocation, affordability (no framework deps)
+apps/api            NestJS modular monolith: auth, consent, products, kyc, applications, risk
 apps/api/prisma     schema, migrations, development seed
 ```
 
@@ -96,10 +98,15 @@ closed by writing code:
 3. Real lender identity, licence details and grievance officer contacts.
 4. Approved v1 product parameters (amount band, tenure, rate, fees, taxes,
    penalties, cooling-off period).
-5. KYC provider, credit bureau, payment/disbursement rails and e-sign vendors,
+5. Credit-committee sign-off of the credit policy in
+   `apps/api/src/modules/risk/policy.ts`. The shipped version is `v1-dev`: its
+   FOIR ceiling, employment-history minimums and fraud thresholds are development
+   defaults, and it decides on declared income with no bureau enquiry and no
+   income verification, so it must not decision a real customer as it stands.
+6. KYC provider, credit bureau, payment/disbursement rails and e-sign vendors,
    with contracts and production credentials held in a secrets manager.
-6. Data-residency, retention and deletion policy sign-off.
-7. Independent security review and penetration test.
+7. Data-residency, retention and deletion policy sign-off.
+8. Independent security review and penetration test.
 
 Until these are closed, no part of this system may be used to make a credit
 decision, take money from a customer, or disburse funds.

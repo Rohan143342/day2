@@ -45,6 +45,35 @@ enum KycStatus {
   EXPIRED
 }
 
+enum ApplicationStatus {
+  DRAFT
+  PROFILE_SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REFERRED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum EmploymentType {
+  SALARIED
+  SELF_EMPLOYED
+  BUSINESS_OWNER
+}
+
+enum IncomeVerificationMethod {
+  DECLARED
+  BANK_STATEMENT
+  PAYSLIP
+}
+
+enum DecisionOutcome {
+  APPROVE
+  REFER
+  REJECT
+}
+
 enum InterestMethodology {
   REDUCING_BALANCE
   FLAT
@@ -88,6 +117,8 @@ model User {
   otpChallenges  OtpChallenge[]
   consents       Consent[]
   kycVerifications KycVerification[]
+  applications     LoanApplication[]
+  profiles         ApplicantProfile[]
 
   @@map("users")
 }
@@ -313,8 +344,131 @@ model LoanProductVersion {
   approvedAt    DateTime?     @map("approved_at")
   createdAt     DateTime      @default(now()) @map("created_at")
 
+  applications LoanApplication[]
+
   @@unique([productId, version])
   @@map("loan_product_versions")
+}
+
+/// A single credit request. The product version is captured at creation so that
+/// repricing the product can never change the terms of an application already in
+/// flight, and every status change is recorded in ApplicationStatusHistory.
+model LoanApplication {
+  id               String @id @default(uuid()) @db.Uuid
+  userId           String @map("user_id") @db.Uuid
+  user             User   @relation(fields: [userId], references: [id])
+  productVersionId String @map("product_version_id") @db.Uuid
+  productVersion   LoanProductVersion @relation(fields: [productVersionId], references: [id])
+  deviceId         String? @map("device_id") @db.Uuid
+
+  requestedAmount       Decimal @map("requested_amount") @db.Decimal(20, 4)
+  requestedTenureMonths Int     @map("requested_tenure_months")
+  /// Declared end-use. Retained because the lender must be able to show what the
+  /// credit was sought for; it is a fixed vocabulary, not free text.
+  purposeCode           String  @map("purpose_code")
+
+  status       ApplicationStatus @default(DRAFT)
+  statusReason String?           @map("status_reason")
+
+  submittedAt DateTime? @map("submitted_at")
+  decidedAt   DateTime? @map("decided_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  profile   ApplicantProfile?
+  decisions RiskDecision[]
+  history   ApplicationStatusHistory[]
+
+  @@index([userId, status, createdAt])
+  @@map("loan_applications")
+}
+
+/// Append-only transition log. The current status on LoanApplication is a
+/// projection of this history, never the only record of it.
+model ApplicationStatusHistory {
+  id            BigInt  @id @default(autoincrement())
+  applicationId String  @map("application_id") @db.Uuid
+  application   LoanApplication @relation(fields: [applicationId], references: [id])
+
+  fromStatus ApplicationStatus? @map("from_status")
+  toStatus   ApplicationStatus  @map("to_status")
+  reason     String?
+  actorType  String   @map("actor_type")
+  actorId    String?  @map("actor_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([applicationId, createdAt])
+  @@map("application_status_history")
+}
+
+/// Financial and employment position as declared for one application. Snapshotted
+/// per application: a later change of job must not silently restate the basis on
+/// which an earlier decision was made.
+///
+/// Deliberately NOT collected: religion, caste, gender, marital status, or any
+/// other protected characteristic. They must never enter a credit decision, so
+/// they are not stored at all.
+model ApplicantProfile {
+  id            String @id @default(uuid()) @db.Uuid
+  applicationId String @unique @map("application_id") @db.Uuid
+  application   LoanApplication @relation(fields: [applicationId], references: [id])
+  userId        String @map("user_id") @db.Uuid
+  user          User   @relation(fields: [userId], references: [id])
+
+  employmentType     EmploymentType @map("employment_type")
+  employerNameEncrypted String?     @map("employer_name_encrypted")
+  workExperienceMonths  Int         @map("work_experience_months")
+
+  monthlyIncome        Decimal @map("monthly_income") @db.Decimal(20, 4)
+  existingMonthlyEmi   Decimal @map("existing_monthly_emi") @db.Decimal(20, 4)
+  incomeVerification   IncomeVerificationMethod @default(DECLARED) @map("income_verification")
+
+  /// Coarse residence data only: enough for state eligibility and servicing.
+  residenceState   String @map("residence_state")
+  residencePincode String @map("residence_pincode") @db.VarChar(6)
+
+  dateOfBirthEncrypted String @map("date_of_birth_encrypted")
+  /// Derived at submission so age bands can be evaluated without decrypting.
+  ageYears             Int    @map("age_years")
+
+  declaredAt DateTime @default(now()) @map("declared_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("applicant_profiles")
+}
+
+/// One row per decisioning run. Inputs, policy version, outcome and reason codes
+/// are all retained so a decision can be explained and reproduced years later,
+/// including to a regulator. Rows are never updated: a re-run creates a new row.
+model RiskDecision {
+  id            String @id @default(uuid()) @db.Uuid
+  applicationId String @map("application_id") @db.Uuid
+  application   LoanApplication @relation(fields: [applicationId], references: [id])
+
+  policyVersion String          @map("policy_version")
+  outcome       DecisionOutcome
+  /// Reason codes are the authoritative explanation; the customer-facing message
+  /// is derived from them, never the other way round.
+  reasonCodes   String[]        @map("reason_codes")
+
+  eligibleAmount     Decimal? @map("eligible_amount") @db.Decimal(20, 4)
+  eligibleTenureMonths Int?   @map("eligible_tenure_months")
+  offeredRatePercent Decimal? @map("offered_rate_percent") @db.Decimal(9, 4)
+  foir               Decimal? @db.Decimal(9, 4)
+
+  fraudScore   Int      @default(0) @map("fraud_score")
+  fraudSignals String[] @map("fraud_signals")
+
+  /// Exact inputs the policy saw, so the run is reproducible. Contains no
+  /// protected characteristics and no document numbers.
+  inputs Json
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([applicationId, createdAt])
+  @@map("risk_decisions")
 }
 
 /// Append-only. No application or admin role is granted DELETE or UPDATE.
