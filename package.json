@@ -1,0 +1,27 @@
+{
+  "name": "instant-lending-platform",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint \"{apps,packages}/**/src/**/*.ts\" \"apps/api/test/**/*.ts\" \"apps/api/prisma/*.ts\"",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.14",
+    "@types/node": "20.17.9",
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "eslint": "8.57.1",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "typescript": "5.5.4"
+  }
+}
