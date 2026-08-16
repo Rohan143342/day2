@@ -12,6 +12,7 @@ if (existsSync(envFile)) loadEnv({ path: envFile });
 
 process.env.NODE_ENV = 'test';
 process.env.SMS_PROVIDER = 'mock';
+process.env.KYC_PROVIDER = 'mock';
 process.env.SWAGGER_ENABLED = 'false';
 process.env.JWT_SECRET = process.env.JWT_SECRET ?? randomBytes(32).toString('hex');
 process.env.FIELD_ENCRYPTION_KEY = process.env.FIELD_ENCRYPTION_KEY ?? randomBytes(32).toString('base64');

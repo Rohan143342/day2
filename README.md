@@ -14,7 +14,8 @@ not a lender. Nothing here is production ready: see
 | OTP authentication, device registry, refresh-token rotation with replay detection | implemented, e2e tested |
 | Granular consent capture and withdrawal | implemented, e2e tested |
 | Product listing and server-computed quote (EMI, fees, tax, APR, full schedule) | implemented, e2e tested |
-| KYC, credit bureau, risk/fraud decisioning, binding offers/KFS, e-sign, ledger, disbursement, repayments, support, admin, mobile app | **not implemented** |
+| KYC provider abstraction (PAN + offline-Aadhaar OTP) with mock provider, encrypted documents, duplicate-document detection | implemented, e2e tested |
+| Credit bureau, risk/fraud decisioning, binding offers/KFS, e-sign, ledger, disbursement, repayments, support, admin, mobile app | **not implemented** |
 
 ## Design principles enforced in code
 

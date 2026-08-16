@@ -19,10 +19,11 @@ export interface AppEnv {
   BLIND_INDEX_KEY: string;
   OTP_PEPPER: string;
   SMS_PROVIDER: string;
+  KYC_PROVIDER: string;
   SWAGGER_ENABLED: boolean;
 }
 
-const MOCKABLE_PROVIDERS = ['SMS_PROVIDER'] as const;
+const MOCKABLE_PROVIDERS = ['SMS_PROVIDER', 'KYC_PROVIDER'] as const;
 
 const required = (env: Record<string, unknown>, key: string): string => {
   const value = env[key];
@@ -61,6 +62,7 @@ export const validateEnv = (env: Record<string, unknown>): AppEnv => {
     BLIND_INDEX_KEY: required(env, 'BLIND_INDEX_KEY'),
     OTP_PEPPER: required(env, 'OTP_PEPPER'),
     SMS_PROVIDER: required(env, 'SMS_PROVIDER'),
+    KYC_PROVIDER: required(env, 'KYC_PROVIDER'),
     SWAGGER_ENABLED: String(env.SWAGGER_ENABLED ?? nodeEnv !== 'production') === 'true',
   };
 

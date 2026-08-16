@@ -9,6 +9,7 @@ const base = (): Record<string, string> => ({
   BLIND_INDEX_KEY: randomBytes(32).toString('base64'),
   OTP_PEPPER: randomBytes(32).toString('base64'),
   SMS_PROVIDER: 'mock',
+  KYC_PROVIDER: 'mock',
 });
 
 describe('validateEnv', () => {
@@ -26,14 +27,21 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...base(), JWT_SECRET: 'too-short' })).toThrow(/JWT_SECRET/);
   });
 
-  it('refuses to start production on a mock provider', () => {
-    expect(() => validateEnv({ ...base(), NODE_ENV: 'production', SMS_PROVIDER: 'mock' })).toThrow(
-      /not permitted when NODE_ENV=production/,
-    );
+  it.each(['SMS_PROVIDER', 'KYC_PROVIDER'])('refuses to start production on a mock %s', (key) => {
+    expect(() =>
+      validateEnv({ ...base(), NODE_ENV: 'production', [key]: 'mock' }),
+    ).toThrow(/not permitted when NODE_ENV=production/);
   });
 
   it('allows a real provider in production', () => {
-    expect(validateEnv({ ...base(), NODE_ENV: 'production', SMS_PROVIDER: 'gateway' }).SWAGGER_ENABLED).toBe(false);
+    expect(
+      validateEnv({
+        ...base(),
+        NODE_ENV: 'production',
+        SMS_PROVIDER: 'gateway',
+        KYC_PROVIDER: 'vendor',
+      }).SWAGGER_ENABLED,
+    ).toBe(false);
   });
 
   it('rejects a non-numeric port', () => {

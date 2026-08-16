@@ -31,6 +31,20 @@ enum OtpPurpose {
   BANK_ACCOUNT_CHANGE
 }
 
+enum KycMethod {
+  PAN
+  AADHAAR_OFFLINE_XML
+}
+
+enum KycStatus {
+  INITIATED
+  AWAITING_OTP
+  VERIFIED
+  FAILED
+  MANUAL_REVIEW
+  EXPIRED
+}
+
 enum InterestMethodology {
   REDUCING_BALANCE
   FLAT
@@ -73,6 +87,7 @@ model User {
   sessions       Session[]
   otpChallenges  OtpChallenge[]
   consents       Consent[]
+  kycVerifications KycVerification[]
 
   @@map("users")
 }
@@ -182,6 +197,47 @@ model Consent {
 
   @@index([userId, purposeCode, grantedAt])
   @@map("consents")
+}
+
+/// One row per KYC attempt, kept even when it fails: repeated failures and the
+/// same document arriving under different users are both fraud signals.
+/// Document numbers are encrypted; the blind index exists so duplicates can be
+/// detected without decrypting anything.
+model KycVerification {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  method KycMethod
+  status KycStatus @default(INITIATED)
+
+  /// Which provider produced this verdict, and its identifier for the request.
+  /// Never null, so a verdict can always be traced back for an audit.
+  providerName      String  @map("provider_name")
+  providerReference String? @map("provider_reference")
+
+  documentNumberEncrypted String? @map("document_number_encrypted")
+  documentBlindIndex      String? @map("document_blind_index")
+  documentLast4           String? @map("document_last4") @db.VarChar(4)
+
+  /// Verified identity attributes as returned by the source, encrypted at rest.
+  nameEncrypted    String? @map("name_encrypted")
+  dobEncrypted     String? @map("dob_encrypted")
+  addressEncrypted String? @map("address_encrypted")
+  /// Name-match score in [0,1] when the provider supplies one.
+  nameMatchScore   Decimal? @map("name_match_score") @db.Decimal(5, 4)
+
+  failureCode String? @map("failure_code")
+  attempts    Int     @default(0)
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  expiresAt  DateTime? @map("expires_at")
+  verifiedAt DateTime? @map("verified_at")
+
+  @@index([userId, method, createdAt])
+  @@index([documentBlindIndex])
+  @@map("kyc_verifications")
 }
 
 model Lender {
